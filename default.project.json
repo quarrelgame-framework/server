@@ -1,0 +1,22 @@
+{
+  "name": "server",
+  "globIgnorePaths": ["**/package.json", "**/tsconfig.json"],
+  "tree": {
+    "$path": "out",
+    "Promise": {
+        "$path": "include/Promise.lua"
+    },
+    "RuntimeLib": {
+        "$path": "include/RuntimeLib.lua"
+    },
+    "node_modules": {
+      "$className": "Folder",
+      "@rbxts": {
+        "$path": "node_modules/@rbxts"
+      },
+      "@flamework": {
+        "$path": "node_modules/@flamework"
+      }
+    }
+  }
+}

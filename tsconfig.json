@@ -17,8 +17,8 @@
     "typeRoots": [
       "./node_modules/@rbxts",
       "./node_modules/@flamework",
-      "./node_modules/@quarrelgame-framework",
-      "./node_modules/@grifon-games"
+      "./node_modules/@grifon-games",
+      "./node_modules/@quarrelgame-framework"
     ],
 
     // configurable

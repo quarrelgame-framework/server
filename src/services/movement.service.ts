@@ -1,5 +1,7 @@
 import { Dependency, OnInit, OnStart, Service } from "@flamework/core";
 import { QuarrelGame } from "./quarrelgame.service";
+import { Functions } from "network";
+import { EntityState } from "@quarrelgame-framework/common";
 
 @Service({})
 export class MovementService implements OnStart, OnInit
@@ -13,10 +15,6 @@ export class MovementService implements OnStart, OnInit
 
     onInit()
     {
-    }
-
-    onStart()
-    {
         const fetchEntityFromPlayer = (player: Player) =>
         {
             assert(this.quarrelGame.IsParticipant(player), `player ${player} is not a participant`);
@@ -27,5 +25,26 @@ export class MovementService implements OnStart, OnInit
 
             return participantPlayer.entity;
         };
+
+        Functions.Crouch.setCallback((plr, crouchState) => 
+        {
+            const entity = fetchEntityFromPlayer(plr);
+            assert(entity, `could not find entity from player ${plr.Name}`);
+
+            entity.Crouch(crouchState === EntityState.Crouch);
+            return true;
+        })
+
+        /* generally, this isn't _supposed_ to be used but it's fine */
+        Functions.Jump.setCallback((plr) => {
+            const entity = fetchEntityFromPlayer(plr);
+            entity.Jump();
+
+            return true;
+        });
+    }
+
+    onStart()
+    {
     }
 }

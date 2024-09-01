@@ -22,10 +22,11 @@ export interface OnCharacterListChanged
 @Service({
     loadOrder: -2,
 })
-export class QuarrelGame implements OnStart, OnInit
+export class QuarrelGame extends QuarrelGameMetadata implements OnStart, OnInit
 {
     constructor()
     {
+        super();
         print("what");
         print(Reflect.getMetadata(this, "identifier"));
     }

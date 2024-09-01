@@ -1,3 +1,3 @@
 import { Dependency } from "@flamework/core"
-import type { SchedulerService } from "services/scheduler.service"
+import type { SchedulerService } from "@quarrelgame-framework/common"
 export const GetTickRate = () => Dependency<SchedulerService>().GetTickRate();

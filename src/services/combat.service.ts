@@ -8,7 +8,7 @@ import { PhysicsEntity } from "components/physics.component";
 import { Functions } from "network";
 import { Character, Skill } from "@quarrelgame-framework/common"
 import { Hitbox } from "@quarrelgame-framework/common"
-import { CommandNormal, Input, isCommandNormal, isInput, Motion, MotionInput, validateMotion } from "@quarrelgame-framework/common"
+import { CommandNormal, Input, isCommandNormal, isInput, Motion, MotionInput, validateMotion, stringifyMotionInput } from "@quarrelgame-framework/common"
 import { ConvertPercentageToNumber, EntityState, getEnumValues, HitboxRegion, HitResult, OnHit } from "@quarrelgame-framework/common"
 import { EffectsService } from "services/effects.service";
 
@@ -78,61 +78,6 @@ export class CombatService implements OnStart, OnInit
             return true;
         });
 
-        const getSkillFromMotionInput = (player: Player, motionInput: MotionInput) =>
-        {
-            let combatantComponent;
-            let selectedCharacter;
-
-            assert(player.Character, "player has not spawned");
-            assert(this.quarrelGame.IsParticipant(player), "player is not a participant");
-            assert(combatantComponent = this.GetEntity(player.Character), "player is not a combatant");
-            assert(
-                selectedCharacter = this.GetSelectedCharacterFromCharacter(this.GetEntity(player.Character)!),
-                `player ${player.UserId}'s selected character is invalid ${player.GetAttribute("SelectedCharacter")}`,
-            );
-
-            const { lastSkillHitResult } = this.lastSkillData.get(combatantComponent) ?? this.lastSkillData.set(combatantComponent, {}).get(combatantComponent)!;
-
-            for (const skill of selectedCharacter.Skills)
-            {
-                const isRecovering = combatantComponent.IsState(EntityState.Recovery);
-                if (skill.MotionInput.every((n, i) => motionInput[i] === n))
-                {
-                    if ((isRecovering && lastSkillHitResult !== HitResult.Whiffed) || !combatantComponent.IsNegative())
-                        return skill;
-
-                    return skill;
-                }
-            }
-
-            return undefined;
-        };
-
-        const getAttackFromCommandNormal = (player: Player, commandNormal: CommandNormal) =>
-        {
-            const [ command, input ] = commandNormal;
-            const combatant = player.Character ? this.GetEntity(player.Character) : undefined;
-
-            if (!combatant)
-                return print("no combatant") as never;
-
-            const selectedCharacter = this.GetSelectedCharacterFromCharacter(combatant);
-
-            if (!selectedCharacter)
-                return print("no combatant") as never;
-
-            print("damn");
-            const commandInputs = [ ...selectedCharacter.Attacks ].filter(([ v ]) => isCommandNormal(v)); // command inputs are a direction + an input
-            for (const [ [ thisCommand, thisInput ], skill ] of commandInputs)
-            {
-                if (command === thisCommand && input === thisInput)
-                    return skill;
-
-                print(`${command} , ${input} !== ${thisCommand}, ${thisInput}`);
-            }
-
-            return undefined;
-        };
 
         const handleInput = (player: Player, input: Input | CommandNormal | MotionInput) =>
         {
@@ -151,79 +96,72 @@ export class CombatService implements OnStart, OnInit
             if (isInput(input))
                 input = [ Motion.Neutral, input ];
 
-            let attackSkillLike: Skill.Skill | (() => Skill.Skill) | undefined;
-            if (isCommandNormal(input))
-                attackSkillLike = getAttackFromCommandNormal(player, input);
-            else
-                attackSkillLike = getSkillFromMotionInput(player, input);
-
-            print("verified command inputs:", ...validateMotion(input, selectedCharacter) ?? []);
-
+            const viableMotions = validateMotion(input, selectedCharacter);
+            let attackSkillLike: Skill.Skill | (() => Skill.Skill) | undefined = viableMotions[0]?.[1];
             const attackSkill = typeIs(attackSkillLike, "function") ? attackSkillLike() : attackSkillLike;
+            print("verified command inputs:", ...(viableMotions).map(([motionInput, skill]) => `${stringifyMotionInput(motionInput)}: ${typeIs(skill, "function") ? skill().Name : skill.Name}`));
             if (attackSkill)
             {
-                if (attackSkill as Skill.Skill)
+                const attackFrameData = attackSkill.FrameData;
+                const previousSkillId = combatantComponent.attributes.PreviousSkill;
+                const attackDidLand = lastSkillHitResult !== HitResult.Whiffed;
+
+                let skillDoesGatling = false;
+
+                if (previousSkillId)
                 {
-                    const attackFrameData = attackSkill.FrameData;
-                    const previousSkillId = combatantComponent.attributes.PreviousSkill;
-                    const attackDidLand = lastSkillHitResult !== HitResult.Whiffed;
+                    const previousSkill = Skill.GetCachedSkill(previousSkillId);
 
-                    let skillDoesGatling = false;
+                    skillDoesGatling = !!(
+                        previousSkill?.GatlingsInto.has(attackSkill.Id)
+                    );
+                }
 
-                    if (previousSkillId)
+                const isRecovering = combatantComponent.IsState(EntityState.Recovery);
+                print("is recovering:", isRecovering);
+                if ((isRecovering && attackDidLand && skillDoesGatling) || !combatantComponent.IsNegative())
+                {
+                    if (skillDoesGatling)
                     {
-                        const previousSkill = Skill.GetCachedSkill(previousSkillId);
-
-                        skillDoesGatling = !!(
-                            previousSkill?.GatlingsInto.has(attackSkill.Id)
-                        );
+                        if (attackDidLand)
+                            print("ooh that does gattle fr");
+                        else
+                            print("attack does gattle, but it didn't land!");
+                    }
+                    else
+                    {
+                        print("doesn't gattle, but not negative!");
                     }
 
-                    const isRecovering = combatantComponent.IsState(EntityState.Recovery);
-                    if ((isRecovering && attackDidLand && skillDoesGatling) || !combatantComponent.IsNegative())
+                    const currentLastSkillTime = os.clock();
+                    combatantComponent.SetHitstop(-1);
+                    this.lastSkillData.set(combatantComponent, {
+                        lastSkillTime: currentLastSkillTime,
+                        lastSkillHitResult,
+                    });
+
+                    print("executing frame data")
+                    return this.executeFrameData(attackFrameData, combatantComponent, attackSkill, currentLastSkillTime).tap(() =>
                     {
-                        if (skillDoesGatling)
+                        if (currentLastSkillTime === lastSkillTime)
                         {
-                            if (attackDidLand)
-                                print("ooh that does gattle fr");
-                            else
-                                print("attack does gattle, but it didn't land!");
+                            print("state reset!");
+                            combatantComponent.ResetState();
                         }
                         else
                         {
-                            print("doesn't gattle, but not negative!");
+                            print("state seems to have changed");
                         }
-
-                        const currentLastSkillTime = os.clock();
-                        combatantComponent.SetHitstop(-1);
-                        this.lastSkillData.set(combatantComponent, {
-                            lastSkillTime: currentLastSkillTime,
-                            lastSkillHitResult,
-                        });
-
-                        return this.executeFrameData(attackFrameData, combatantComponent, attackSkill, currentLastSkillTime).tap(() =>
-                        {
-                            if (currentLastSkillTime === lastSkillTime)
-                            {
-                                print("state reset!");
-                                combatantComponent.ResetState();
-                            }
-                            else
-                            {
-                                print("state seems to have changed");
-                            }
-                        });
-                    }
-                    else if (!skillDoesGatling)
-                    {
-                        print(
-                            `nah that dont gattle (${skillDoesGatling}):`,
-                            previousSkillId ? Skill.GetCachedSkill(previousSkillId)?.GatlingsInto ?? "invalid skill id" : "no skill id",
-                        );
-                    }
-
-                    return Promise.resolve(false);
+                    });
                 }
+                else if (!skillDoesGatling)
+                {
+                    print(
+                        `nah that dont gattle (${skillDoesGatling}):`,
+                        previousSkillId ? Skill.GetCachedSkill(previousSkillId)?.GatlingsInto ?? "invalid skill id" : "no skill id",
+                    );
+                }
+
 
                 return Promise.resolve(false);
             }

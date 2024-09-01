@@ -304,18 +304,30 @@ export class Match
                 ? map.GetArenaFromIndex(MapNamespace.ArenaType["2D"], 0)
                 : map.GetArenaFromIndex(MapNamespace.ArenaType["3D"], 0);
 
-            for (const participant of this.GetReadyParticipants())
+            /* load characters asynchronously but have them converge */
+            const participantArray = [...this.GetReadyParticipants()];
+            return new Promise((res, rej) => Promise.allSettled(participantArray.map((participant) => 
             {
                 print("loading participant:", participant.instance.Name);
                 const startType = randomStart === ArenaTypeFlags["ALLOW_2D"] ? MapNamespace.ArenaType["2D"] : MapNamespace.ArenaType["3D"];
-                this.RespawnParticipant(participant, startType, 0);
-                Events.MatchStarted.fire(participant.instance, this.matchId, this.Serialize(participant));
-            }
+                return this.RespawnParticipant(participant, startType, 0).then(() => Events.MatchStarted.fire(participant.instance, this.matchId, this.Serialize(participant)))
+            })).then((statuses) => statuses.filter((status) => status !== Promise.Status.Resolved)).then((failedPromises) =>
+            {
+                const listSize = failedPromises.size();
+                if (listSize > 0)
 
-            this.Starting.Fire();
-            return Promise.fromEvent(this.Ended).finally(
-                () => (this.matchPhase = MatchPhase.Ending),
-            );
+                    warn(
+                        `${
+                            failedPromises.map((_, i) => participantArray[i].instance.Name)
+                            .reduce((a,v,i) => participantArray[i + 1] ? `${v}, ` : `${v}`, `Client${listSize > 1 ? "s" : ""} `)} failed to load.`)
+
+                this.Starting.Fire();
+                return res(Promise.fromEvent(this.Ended).finally(
+                    () => (this.matchPhase = MatchPhase.Ending),
+                ));
+            }))
+            
+
         }).then(() => print("match started"));
     }
 
@@ -375,7 +387,7 @@ export class Match
      * @param arenaIndex The index of the arena to respawn the participant in.
      * @param combatMode The combat mode to set the participant to.
      */
-    public RespawnParticipant(
+    public async RespawnParticipant(
         participant: Participant,
         arenaType: MapNamespace.ArenaType = MapNamespace.ArenaType["2D"],
         arenaIndex = 0,
@@ -383,7 +395,7 @@ export class Match
     )
     {
         const map = this.GetMap();
-        participant
+        return participant
             .LoadCombatant({
                 characterId: participant.attributes.SelectedCharacter,
                 matchId: this.matchId,
@@ -392,13 +404,17 @@ export class Match
             {
                 map.MoveEntityToArena(arenaType, arenaIndex, combatant);
 
+                Events.ArenaChanged(participant.instance, map.attributes.MapId,  arenaIndex);
+
                 Events.MatchParticipantRespawned.fire(
                     participant.instance,
                     combatant.instance,
                 );
 
                 Events.SetCombatMode.fire(participant.instance, combatMode);
-            });
+
+                return combatant
+            }).catch(print);
     }
 
     public GetMatchPhase()

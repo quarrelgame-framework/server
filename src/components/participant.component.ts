@@ -1,7 +1,7 @@
 import { BaseComponent, Component, Components } from "@flamework/components";
-import { Dependency, OnStart } from "@flamework/core";
+import { Dependency } from "@flamework/core";
 import { HttpService, Workspace } from "@rbxts/services";
-import { Entity, EntityAttributes, ParticipantAttributes } from "@quarrelgame-framework/common";
+import { Entity, EntityAttributes, EntityBase, ParticipantAttributes } from "@quarrelgame-framework/common";
 
 import { MatchService } from "services/matchservice.service";
 import type { QuarrelGame } from "services/quarrelgame.service";
@@ -108,7 +108,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
             let _conn: RBXScriptConnection | void = this.instance.CharacterAdded.Connect((character) =>
             {
                 if (character !== newCharacterModel)
-                    return print(character, "!==", newCharacterModel);
+                    return error(`${ character }, "!==", ${ newCharacterModel }`);
 
                 print(`character ${character.Name} is now the participant's character.`);
                 _conn = _conn?.Disconnect();
@@ -138,9 +138,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
     {
         return new Promise<Entity>((res) =>
         {
-            this.instance.LoadCharacter();
-
-            this.instance.CharacterAppearanceLoaded.Once((char) =>
+            this.instance.CharacterAdded.Once((char) =>
             {
                 this.character = char;
                 this.entity = Dependency<Components>().addComponent<Entity>(this.character);
@@ -148,6 +146,8 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
 
                 return res(this.entity);
             });
+
+            this.instance.LoadCharacter();
         });
     }
 

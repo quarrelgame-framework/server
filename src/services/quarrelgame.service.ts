@@ -4,7 +4,7 @@ import Make from "@rbxts/make";
 import { Players, StarterPlayer, Workspace } from "@rbxts/services";
 import { Participant } from "components/participant.component";
 
-import { Character, BlockMode } from "@quarrelgame-framework/common";
+import { QuarrelGameMetadata, Character, BlockMode, Animator } from "@quarrelgame-framework/common";
 
 import { Functions } from "network";
 import { MatchService } from "./matchservice.service";
@@ -58,6 +58,8 @@ export class QuarrelGame extends QuarrelGameMetadata implements OnStart, OnInit
 
         for (const listener of this.characterListChangedHandler)
             listener.onCharacterListChanged(characters);
+
+        Animator.RegisterCharacters(characters);
     }
 
     onInit()

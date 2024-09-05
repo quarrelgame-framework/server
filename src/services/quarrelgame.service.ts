@@ -43,24 +43,9 @@ export class QuarrelGame extends QuarrelGameMetadata implements OnStart, OnInit
         Name: "MapContainer",
     });
 
-    public readonly characters: Map<string, Character.Character> = new Map();
-
     private readonly characterListChangedHandler = new Set<OnCharacterListChanged>();
 
     private readonly participantAddedHandler = new Set<OnParticipantAdded>();
-
-    public SetCharacters(characters: ReadonlyMap<string, Character.Character>)
-    {
-        this.characters.clear();
-        print("chars cleared huhuhuh");
-        for (const [ k, v ] of characters)
-            this.characters.set(k, v);
-
-        for (const listener of this.characterListChangedHandler)
-            listener.onCharacterListChanged(characters);
-
-        Animator.RegisterCharacters(characters);
-    }
 
     onInit()
     {

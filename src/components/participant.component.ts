@@ -1,10 +1,9 @@
 import { BaseComponent, Component, Components } from "@flamework/components";
 import { Dependency } from "@flamework/core";
 import { HttpService, Workspace } from "@rbxts/services";
-import { Entity, EntityAttributes, EntityBase, ParticipantAttributes } from "@quarrelgame-framework/common";
+import { CharacterManager, Entity, EntityAttributes, EntityBase, ParticipantAttributes } from "@quarrelgame-framework/common";
 
 import { MatchService } from "services/matchservice.service";
-import type { QuarrelGame } from "services/quarrelgame.service";
 // import { EntityEvent } from "shared/components/new-entity.component";
 
 interface CombatantLoader
@@ -25,6 +24,10 @@ interface CombatantLoader
 export class Participant extends BaseComponent<ParticipantAttributes, Player & { Character: defined; }>
 {
     public readonly id: string = this.attributes.ParticipantId;
+    constructor(protected readonly CharacterManager: CharacterManager)
+    {
+        super();
+    }
 
     private onEntityDied()
     {
@@ -49,12 +52,8 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
 
     public async SelectCharacter(characterId: string): Promise<boolean>
     {
-        const characters = Dependency<QuarrelGame>().characters;
-
-        assert(
-            characters.has(characterId),
-            `Character of ID ${characterId} does not exist.`,
-        );
+        const character = this.CharacterManager.GetCharacter(characterId);
+        assert(character, `Character of ID ${characterId} does not exist.`);
         this.instance.SetAttribute("SelectedCharacter", characterId);
 
         return true;
@@ -72,7 +71,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
         matchId = this.instance.GetAttribute("MatchId") as string,
     }: CombatantLoader)
     {
-        const characters = Dependency<QuarrelGame>().characters;
+        const characters = this.CharacterManager.GetCharacters();
 
         assert(
             characterId,
@@ -91,7 +90,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
         return new Promise<Entity<A>>((res) =>
         {
             assert(
-                characters.has(characterId),
+                this.CharacterManager.CharacterExists(characterId),
                 `character of ID ${characterId} does not exist.`,
             );
 

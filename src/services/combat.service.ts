@@ -3,11 +3,9 @@ import { QuarrelGame } from "./quarrelgame.service";
 
 import { Components } from "@flamework/components";
 import { Players } from "@rbxts/services";
-import * as Entity from "@quarrelgame-framework/common"
 import { PhysicsEntity } from "components/physics.component";
 import { Functions } from "network";
-import { Character, Skill } from "@quarrelgame-framework/common"
-import { Hitbox } from "@quarrelgame-framework/common"
+import { CharacterManager, Hitbox, Entity, Character, EntityAttributes, Skill, validateGroundedState } from "@quarrelgame-framework/common"
 import { CommandNormal, Input, isCommandNormal, isInput, Motion, MotionInput, validateMotion, stringifyMotionInput } from "@quarrelgame-framework/common"
 import { ConvertPercentageToNumber, EntityState, getEnumValues, HitboxRegion, HitResult, OnHit } from "@quarrelgame-framework/common"
 import { EffectsService } from "services/effects.service";
@@ -24,7 +22,7 @@ export class CombatService implements OnStart, OnInit
         lastSkillHitResult?: HitResult;
     }>();
 
-    constructor(private readonly quarrelGame: QuarrelGame, private readonly effectsService: EffectsService)
+    constructor(private readonly quarrelGame: QuarrelGame, private readonly CharacterManager: CharacterManager, private readonly effectsService: EffectsService)
     {}
 
     onInit()
@@ -44,7 +42,7 @@ export class CombatService implements OnStart, OnInit
 
             const participantItem = this.quarrelGame.GetParticipantFromCharacter(player.Character)!;
             const physicsEntity = components.getComponent<PhysicsEntity>(participantItem.character!);
-            const normalEntity = components.getComponent<Entity.Entity>(participantItem.character!);
+            const normalEntity = components.getComponent<Entity>(participantItem.character!);
 
             assert(physicsEntity, "physics entity not found");
 
@@ -85,7 +83,7 @@ export class CombatService implements OnStart, OnInit
             assert(this.quarrelGame.IsParticipant(player), "player is not a participant");
             assert(player.Character, "character is not defined");
 
-            let combatantComponent: Entity.Entity<Entity.EntityAttributes>;
+            let combatantComponent: Entity<EntityAttributes>;
             let selectedCharacter: Character.Character;
             assert(combatantComponent = this.GetEntity(player.Character) as never, "entity component not found");
             assert(selectedCharacter = this.GetSelectedCharacterFromCharacter(combatantComponent) as never, "selected character not found");
@@ -96,10 +94,8 @@ export class CombatService implements OnStart, OnInit
             if (isInput(input))
                 input = [ Motion.Neutral, input ];
 
-            const viableMotions = validateMotion(input, selectedCharacter);
-            let attackSkillLike: Skill.Skill | (() => Skill.Skill) | undefined = viableMotions[0]?.[1];
-            const attackSkill = typeIs(attackSkillLike, "function") ? attackSkillLike() : attackSkillLike;
-            print("verified command inputs:", ...(viableMotions).map(([motionInput, skill]) => `${stringifyMotionInput(motionInput)}: ${typeIs(skill, "function") ? skill().Name : skill.Name}`));
+            const viableMotions = validateMotion(input, selectedCharacter).map(([_, maybeSkill]) => typeIs(maybeSkill, "function") ? maybeSkill(combatantComponent) : maybeSkill).filter((maybeSkill) => validateGroundedState(maybeSkill, combatantComponent));
+            const attackSkill = viableMotions[0]
             if (attackSkill)
             {
                 const attackFrameData = attackSkill.FrameData;
@@ -141,18 +137,7 @@ export class CombatService implements OnStart, OnInit
                     });
 
                     print("executing frame data")
-                    return this.executeFrameData(attackFrameData, combatantComponent, attackSkill, currentLastSkillTime).tap(() =>
-                    {
-                        if (currentLastSkillTime === lastSkillTime)
-                        {
-                            print("state reset!");
-                            combatantComponent.ResetState();
-                        }
-                        else
-                        {
-                            print("state seems to have changed");
-                        }
-                    });
+                    return this.executeFrameData(attackFrameData, combatantComponent, attackSkill, currentLastSkillTime);
                 }
                 else if (!skillDoesGatling)
                 {
@@ -186,8 +171,8 @@ export class CombatService implements OnStart, OnInit
     }
 
     private executeFrameData<
-        T extends Entity.EntityAttributes,
-    >(attackFrameData: Skill.FrameData, attackerEntity: Entity.Entity<T>, attackSkill: Skill.Skill, lastSkillTime: number)
+        T extends EntityAttributes,
+    >(attackFrameData: Skill.FrameData, attackerEntity: Entity<T>, attackSkill: Skill.Skill, lastSkillTime: number)
     {
         return attackFrameData.Execute(attackerEntity, attackSkill).then(async (hitData) =>
         {
@@ -213,10 +198,10 @@ export class CombatService implements OnStart, OnInit
     {
         const components = Dependency<Components>();
 
-        return components.getComponent(instance, Entity.Entity) ?? components.getComponent(instance, Entity.Entity);
+        return components.getComponent(instance, Entity) ?? components.getComponent(instance, Entity);
     }
 
-    public GetSelectedCharacterFromCharacter<T extends Entity.EntityAttributes>(instance: Model | Entity.Entity<T>)
+    public GetSelectedCharacterFromCharacter<T extends EntityAttributes>(instance: Model | Entity<T>)
     {
         const characterId = Players.GetPlayers().filter((n) =>
         {
@@ -234,10 +219,11 @@ export class CombatService implements OnStart, OnInit
 
         assert(characterId, `character ${characterId} is not found`);
 
-        return Dependency<QuarrelGame>().characters.get(characterId as string);
+        return this.CharacterManager.GetCharacter(characterId as string);
     }
 
     public ApplyImpulse(impulseTarget: Model)
     {
     }
 }
+

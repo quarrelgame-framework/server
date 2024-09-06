@@ -109,8 +109,7 @@ export class CombatService implements OnStart, OnInit
                     const previousSkill = Skill.GetCachedSkill(previousSkillId);
 
                     skillDoesGatling = !!(
-                        previousSkill?.GatlingsInto.has(attackSkill.Id)
-                    );
+                        previousSkill?.GatlingsInto.find((e) => (typeIs(e[1], "function") ? e[1](combatantComponent) : e[1]).Id === attackSkill.Id));
                 }
 
                 const isRecovering = combatantComponent.IsState(EntityState.Recovery);

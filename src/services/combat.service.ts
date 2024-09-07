@@ -5,7 +5,7 @@ import { Components } from "@flamework/components";
 import { Players } from "@rbxts/services";
 import { PhysicsEntity } from "components/physics.component";
 import { Functions } from "network";
-import { CharacterManager, Hitbox, Entity, Character, EntityAttributes, Skill, validateGroundedState } from "@quarrelgame-framework/common"
+import { CharacterManager, Hitbox, Entity, Character, EntityAttributes, Skill, validateGroundedState, SkillManager } from "@quarrelgame-framework/common"
 import { CommandNormal, Input, isCommandNormal, isInput, Motion, MotionInput, validateMotion, stringifyMotionInput } from "@quarrelgame-framework/common"
 import { ConvertPercentageToNumber, EntityState, getEnumValues, HitboxRegion, HitResult, OnHit } from "@quarrelgame-framework/common"
 import { EffectsService } from "services/effects.service";
@@ -22,7 +22,7 @@ export class CombatService implements OnStart, OnInit
         lastSkillHitResult?: HitResult;
     }>();
 
-    constructor(private readonly quarrelGame: QuarrelGame, private readonly CharacterManager: CharacterManager, private readonly effectsService: EffectsService)
+    constructor(private readonly quarrelGame: QuarrelGame, private readonly CharacterManager: CharacterManager, private readonly effectsService: EffectsService, private readonly skillManager: SkillManager)
     {}
 
     onInit()
@@ -106,10 +106,10 @@ export class CombatService implements OnStart, OnInit
 
                 if (previousSkillId)
                 {
-                    const previousSkill = Skill.GetCachedSkill(previousSkillId);
+                    const previousSkill = this.skillManager.GetSkill(previousSkillId);
 
                     skillDoesGatling = !!(
-                        previousSkill?.GatlingsInto.find((e) => (typeIs(e[1], "function") ? e[1](combatantComponent) : e[1]).Id === attackSkill.Id));
+                        previousSkill?.Gatlings.find((e) => (typeIs(e[1], "function") ? e[1](combatantComponent) : e[1]).Id === attackSkill.Id));
                 }
 
                 const isRecovering = combatantComponent.IsState(EntityState.Recovery);
@@ -142,7 +142,7 @@ export class CombatService implements OnStart, OnInit
                 {
                     print(
                         `nah that dont gattle (${skillDoesGatling}):`,
-                        previousSkillId ? Skill.GetCachedSkill(previousSkillId)?.GatlingsInto ?? "invalid skill id" : "no skill id",
+                        previousSkillId ? this.skillManager.GetSkill(previousSkillId)?.Gatlings ?? "invalid skill id" : "no skill id",
                     );
                 }
 

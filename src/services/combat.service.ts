@@ -94,7 +94,7 @@ export class CombatService implements OnStart, OnInit
             if (isInput(input))
                 input = [ Motion.Neutral, input ];
 
-            const viableMotions = validateMotion(input, selectedCharacter).map(([_, maybeSkill]) => typeIs(maybeSkill, "function") ? maybeSkill(combatantComponent) : maybeSkill).filter((maybeSkill) => validateGroundedState(maybeSkill, combatantComponent));
+            const viableMotions = validateMotion(input, selectedCharacter, ({castingEntity: combatantComponent, closeEnemies: [], closeFriendlies: []})).map(([,skill]) => skill).filter((maybeSkill) => validateGroundedState(maybeSkill, combatantComponent));
             const attackSkill = viableMotions[0]
             if (attackSkill)
             {
@@ -109,7 +109,7 @@ export class CombatService implements OnStart, OnInit
                     const previousSkill = this.skillManager.GetSkill(previousSkillId);
 
                     skillDoesGatling = !!(
-                        previousSkill?.Gatlings.find((e) => (typeIs(e[1], "function") ? e[1](combatantComponent) : e[1]).Id === attackSkill.Id));
+                        previousSkill?.Gatlings.find((e) => (typeIs(e[1], "function") ? e[1]({castingEntity: combatantComponent, targetEntities: new Set(), closeFriendlies: [], closeEnemies: []}) : this.skillManager.IdFromSkill(e[1])) === this.skillManager.IdFromSkill(attackSkill)));
                 }
 
                 const isRecovering = combatantComponent.IsState(EntityState.Recovery);
@@ -156,17 +156,18 @@ export class CombatService implements OnStart, OnInit
         Functions.SubmitMotionInput.setCallback(handleInput);
 
         // read input enums and setup events
-        getEnumValues(Input).forEach(([ inputName, inputTranslation ]) =>
-        {
-            if (!(`${inputTranslation}` as Input in Functions))
-            {
-                warn(`${inputTranslation} is not a valid ServerFunction.`);
-
-                return;
-            }
-
-            Functions[`${inputTranslation}` as Input].setCallback((player) => handleInput(player, inputTranslation));
-        });
+        // FIXME: deprecate this?
+        // getEnumValues(Input).forEach(([ inputName, inputTranslation ]) =>
+        // {
+        //     if (!(`${inputTranslation}` as Input in Functions))
+        //     {
+        //         warn(`${inputTranslation} is not a valid ServerFunction.`);
+        //
+        //         return;
+        //     }
+        //
+        //     Functions[`${inputTranslation}` as Input].setCallback((player) => handleInput(player, inputTranslation));
+        // });
     }
 
     private executeFrameData<

@@ -1,7 +1,7 @@
 import { Components } from "@flamework/components";
 import { Dependency, OnInit, OnStart, Service } from "@flamework/core";
 import { Events, Functions } from "network";
-import { Client, Identifier, Entity, EntityAttributes } from "@quarrelgame-framework/common";
+import { Client, Identifier, Entity, EntityAttributes, TrainingAttributes, CharacterManager, QuarrelAssets } from "@quarrelgame-framework/common";
 
 import { Participant, ParticipantAttributes } from "components/participant.component";
 import { Map as MapNamespace, MatchSettings, MatchPhase, MatchData as SerializedMatchData } from "@quarrelgame-framework/common";
@@ -9,6 +9,7 @@ import { QuarrelGame } from "services/quarrelgame.service";
 
 import Make from "@rbxts/make";
 import Signal from "@rbxts/signal";
+import { Workspace } from "@rbxts/services";
 
 export enum ArenaTypeFlags
 {
@@ -33,6 +34,8 @@ export interface PostMatchData
 
 export class Match
 {
+    private readonly MatchService = Dependency<MatchService>();
+
     private matchSettings: MatchSettings = {
         ArenaType: ArenaTypeFlags["ALLOW_2D"] | ArenaTypeFlags["ALLOW_3D"],
         Map: "happyhome",
@@ -43,6 +46,8 @@ export class Match
     private readonly participants: Set<Participant> = new Set();
 
     private readonly matchFolder: Folder;
+
+    private trainingDummy?: Entity;
 
     private matchPhase: MatchPhase = MatchPhase.Waiting;
 
@@ -67,6 +72,42 @@ export class Match
         this.matchFolder = Make("Folder", {
             Name: `Match-${this.matchId}`,
         });
+
+            this.Starting.Connect(() => 
+            {
+                warn("starting")
+                if (this.matchSettings.Training?.Enabled)
+                {
+                    if (!this.matchHost.entity)
+                    {
+                        warn("no match host entity")
+                        this.matchHost.instance.CharacterAdded.Once((char) => {
+                            let removingConnection: RBXScriptConnection | void | undefined;
+                            warn("character added")
+
+                            Promise
+                                .race<void>([
+                                    Dependency<Components>().waitForComponent<Entity>(char).then((entity) => entity).then(() => 
+                                    {
+                                        print("entity found on char")
+                                        removingConnection = removingConnection?.Disconnect()
+                                    }),
+                                    new Promise<void>((_,rej) => 
+                                    {
+                                        return removingConnection = this.matchHost.instance.CharacterRemoving.Once(() => {
+                                            removingConnection?.Disconnect();
+                                            removingConnection = undefined;
+                                            rej();
+                                        })
+                                    })
+                                ])
+                                .catch(() => /* TODO: if verbose mode print "no print training dummy */ warn("haha goofy hehee hoohoo test character"))
+                                .then(() => this.RespawnTrainingDummy(this.matchHost))
+                        })
+                    }
+                    else this.RespawnTrainingDummy(this.matchHost);
+                } else warn("training not enabled:", this.matchSettings);
+            });
 
         this.matchFolder.SetAttribute("MatchId", this.matchId);
     }
@@ -206,7 +247,7 @@ export class Match
      */
     public GetMatchSettings()
     {
-        return { ...this.matchSettings };
+        return { ...this.matchSettings } as MatchSettings;
     }
 
     /**
@@ -231,7 +272,7 @@ export class Match
             [ ...this.participants_ready ].map((participant) =>
             {
                 print(`requesting participant ${participant.attributes.ParticipantId} to load map...`);
-                return new Promise<Participant["id"]>((res, rej) =>
+                return new Promise<Participant["id"]>(async (res, rej) =>
                 {
                     return Functions.RequestLoadMap(
                         participant.instance,
@@ -322,6 +363,7 @@ export class Match
                             .reduce((a,v,i) => participantArray[i + 1] ? `${v}, ` : `${v}`, `Client${listSize > 1 ? "s" : ""} `)} failed to load.`)
 
                 this.Starting.Fire();
+
                 return res(Promise.fromEvent(this.Ended).finally(
                     () => (this.matchPhase = MatchPhase.Ending),
                 ));
@@ -415,6 +457,62 @@ export class Match
 
                 return combatant
             }).catch(print);
+    }
+
+    public async RespawnTrainingDummy(caller: Participant)
+    {
+        // FIXME: add authority for this
+        const {Training = {} as TrainingAttributes} = (this.matchSettings)
+        const {CharacterId: DummyCharacterId} = Training.TrainingDummy;
+        const Components = Dependency<Components>();
+        assert (Training?.Enabled, "training is not enabled");
+        assert (DummyCharacterId, "training dummy has no character id");
+        assert(caller.entity, "caller has no entity");
+        const callerEntityLocation = this.GetMap().GetEntityLocation(caller.entity);
+        assert(callerEntityLocation, "could not find caller entity location");
+        
+        if (this.trainingDummy)
+        {
+            Components.removeComponent<Entity>(this.trainingDummy.instance);
+            this.trainingDummy.instance.Destroy();
+        }
+
+        const DummyCharacter = Dependency<CharacterManager>().GetCharacter(DummyCharacterId)
+        const DummyCharacterModel = DummyCharacter?.Model.Clone()!;
+        DummyCharacterModel.Parent = Workspace.WaitForChild("CharacterContainer");
+        assert (DummyCharacter, `training dummy has invalid character id ${DummyCharacterId}`)
+
+        DummyCharacterModel.SetAttribute("CharacterId", DummyCharacterId);
+        DummyCharacterModel.SetAttribute("MatchId", this.matchId);
+        DummyCharacterModel.SetAttribute("IsServerEntity", true);
+
+        const callerArena = this.GetMap().GetArenaFromIndex(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex);
+        assert(callerArena, "caller arena could not be found");
+
+        this.trainingDummy = Dependency<Components>().addComponent<Entity>(DummyCharacterModel);
+        this.GetMap().MoveEntityToArena(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex, this.trainingDummy)
+        // switch (callerEntityLocation.arenaType)
+        // {
+        //     case MapNamespace.ArenaType["3D"]:
+        //         DummyCharacterModel.PivotTo(callerArena.config.Origin.Value.add(new Vector3(0, this.trainingDummy.GroundController.GroundOffset + 0.5)));
+        //
+        //     case MapNamespace.ArenaType["2D"]:
+        //         
+        //         /* FIXME: this does not work when the training dummy is player 1
+        //          * because i never specify where the player 1 spawns let alone
+        //          * the question of who is player 1 or player 2
+        //          *  
+        //          * also the character might float for a sec if their bounding box is high lol:w
+        //          */
+        //         DummyCharacterModel.PivotTo(
+        //             callerArena.config.Origin.Value.add(
+        //                 callerArena.config.Axis.Value
+        //                 .mul(-callerArena.config.CombatantSpacing.Value)
+        //                 .add(new Vector3(0,this.trainingDummy.GroundController.GroundOffset + 0.5))
+        //             )
+        //         )
+        // }
+
     }
 
     public GetMatchPhase()
@@ -552,7 +650,7 @@ export class MatchService implements OnStart, OnInit
             .GetArenaFromIndex(
                 currentLocation.arenaType,
                 currentLocation.arenaIndex,
-            )! as SerializedMatchData["Arena"];
+            )!;
 
         return {
             Settings: ongoingMatch.GetMatchSettings(),
@@ -583,6 +681,7 @@ export class MatchService implements OnStart, OnInit
     public CreateMatch(matchData: MatchData)
     {
         const newMatch = new Match(matchData.Participants[0]);
+        newMatch.SetMatchSettings(matchData.Settings);
         this.ongoingMatches.set(newMatch.matchId, newMatch);
 
         matchData.Participants.forEach((participant) => newMatch.AddParticipant(participant));

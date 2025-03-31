@@ -4,6 +4,7 @@ import { HttpService, Workspace } from "@rbxts/services";
 import { CharacterManager, Entity, EntityAttributes, EntityBase, ParticipantAttributes } from "@quarrelgame-framework/common";
 
 import { MatchService } from "services/matchservice.service";
+import Signal from "@rbxts/signal";
 // import { EntityEvent } from "shared/components/new-entity.component";
 
 interface CombatantLoader
@@ -24,6 +25,11 @@ interface CombatantLoader
 export class Participant extends BaseComponent<ParticipantAttributes, Player & { Character: defined; }>
 {
     public readonly id: string = this.attributes.ParticipantId;
+
+    public EntitySpawned = new Signal<((entity: Entity) => void)>
+
+    public EntityDied = new Signal<((entity?: Entity) => void)>
+
     constructor(protected readonly CharacterManager: CharacterManager)
     {
         super();
@@ -31,11 +37,15 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
 
     private onEntityDied()
     {
+        this.EntityDied.Fire(this.entity);
+        this.entity = undefined;
+
         if (this.attributes.MatchId)
         {
             for (const match of Dependency<MatchService>().GetOngoingMatches())
             {
                 if (match.GetParticipants().has(this))
+
                     return match.RespawnParticipant(this);
             }
         }
@@ -104,27 +114,27 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
             newCharacterModel.Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None;
             newCharacterModel.Humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff;
 
-            let _conn: RBXScriptConnection | void = this.instance.CharacterAdded.Connect((character) =>
+            this.instance.CharacterAdded.Once((character) =>
             {
                 if (character !== newCharacterModel)
                     return error(`${ character }, "!==", ${ newCharacterModel }`);
 
-                print(`character ${character.Name} is now the participant's character.`);
-                _conn = _conn?.Disconnect();
-
+                assert(this.entity, "entity is undefined");
+                this.EntitySpawned.Fire(this.entity);
+                this.setupDiedHandler();
                 res(this.entity as never);
             });
 
+            print("set entity lol")
             this.entity = Dependency<Components>().addComponent<Entity>(newCharacterModel);
             this.instance.Character = newCharacterModel;
             this.character = this.instance.Character;
 
-            this.setupDiedHandler();
-            task.delay(2.5, () =>
-            {
-                if (_conn)
-                    return _conn = _conn.Disconnect();
-            });
+            // task.delay(2.5, () =>
+            // {
+            //     if (_conn)
+            //         return _conn = _conn.Disconnect();
+            // });
         });
     }
 

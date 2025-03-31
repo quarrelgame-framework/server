@@ -43,17 +43,21 @@ export class Match
 
     private readonly participants_ready: Set<Participant> = new Set();
 
+    private readonly entity_connections: Map<Participant, RBXScriptConnection[]> = new Map();
+
     private readonly participants: Set<Participant> = new Set();
 
     private readonly matchFolder: Folder;
-
-    private trainingDummy?: Entity;
 
     private matchPhase: MatchPhase = MatchPhase.Waiting;
 
     private matchHost;
 
     /** Signals **/
+    public readonly Respawning = new Signal<(entity: Entity) => void>()
+
+    public readonly Died = new Signal<(entity?: Entity) => void>();
+
     public readonly Starting = new Signal<() => void>();
 
     public readonly Ended = new Signal<(postMatchData: PostMatchData) => void>();
@@ -65,6 +69,9 @@ export class Match
     public readonly Joining = new Signal<(participant: string) => void>();
 
     public readonly Leaving = new Signal<(participant: string) => void>();
+
+    /* TODO: maybe turn this into a getter function?*/
+    public readonly trainingDummy?: Entity;
 
     constructor(private readonly originalMatchHost: Participant, public readonly matchId = Identifier.Generate())
     {
@@ -141,6 +148,19 @@ export class Match
 
         this.participants_ready.add(participant);
         this.Ready.Fire(participant.id);
+
+        const entity_connections = this.entity_connections.set(participant, this.entity_connections.get(participant) ?? [] as RBXScriptConnection[]).get(participant)!;
+        entity_connections.push(
+            participant.EntitySpawned.Connect((entity) =>
+            {
+                this.Respawning.Fire(entity)
+            }),
+            participant.EntityDied.Connect((entity) =>
+            {
+                this.Died.Fire(entity)
+            }));
+
+
         return true;
     }
 
@@ -159,6 +179,7 @@ export class Match
 
         this.participants_ready.delete(participant);
         this.NotReady.Fire(participant.id);
+        this.entity_connections.get(participant)?.map((e) => e.Disconnect()).clear();
         return true;
     }
 
@@ -337,45 +358,43 @@ export class Match
             }
 
             const randomStart = ArenaTypeFlags["ALLOW_2D"]; /* [
-                ArenaTypeFlags[ "ALLOW_2D" ],
+                ArenaTypeFlags[ "ALLOW_3D" ],
                 ArenaTypeFlags[ "ALLOW_3D" ],
             ][ math.random(1, 2) - 1 ];*/
 
-            const arena = randomStart === ArenaTypeFlags["ALLOW_2D"]
-                ? map.GetArenaFromIndex(MapNamespace.ArenaType["2D"], 0)
-                : map.GetArenaFromIndex(MapNamespace.ArenaType["3D"], 0);
-
             /* load characters asynchronously but have them converge */
             const participantArray = [...this.GetReadyParticipants()];
-            return new Promise((res, rej) => Promise.allSettled(participantArray.map((participant) => 
-            {
-                print("loading participant:", participant.instance.Name);
-                const startType = randomStart === ArenaTypeFlags["ALLOW_2D"] ? MapNamespace.ArenaType["2D"] : MapNamespace.ArenaType["3D"];
-                return this.RespawnParticipant(participant, startType, 0).then(() => Events.MatchStarted.fire(participant.instance, this.matchId, this.Serialize(participant)))
-            })).then((statuses) => statuses.filter((status) => status !== Promise.Status.Resolved)).then((failedPromises) =>
-            {
-                const listSize = failedPromises.size();
-                if (listSize > 0)
+            return new Promise((res, rej) => 
+                Promise.allSettled(participantArray.map(async (participant) => 
+                {
+                    print("loading participant:", participant.instance.Name);
+                    const startType = randomStart === ArenaTypeFlags["ALLOW_2D"] ? MapNamespace.ArenaType["2D"] : MapNamespace.ArenaType["3D"];
+                    return await this.RespawnParticipant(participant, startType, 0)
+                            .tap(() => warn(participant, participant.entity, startType, 0))
+                            .then(() => Events.MatchStarted.fire(participant.instance, this.matchId, this.Serialize(participant)))
+                }))
+                .then((statuses) => statuses.filter((status) => status !== Promise.Status.Resolved)).then((failedPromises) =>
+                {
+                    const listSize = failedPromises.size();
+                    if (listSize > 0)
 
-                    warn(
-                        `${
-                            failedPromises.map((_, i) => participantArray[i].instance.Name)
-                            .reduce((a,v,i) => participantArray[i + 1] ? `${v}, ` : `${v}`, `Client${listSize > 1 ? "s" : ""} `)} failed to load.`)
+                        warn(
+                            `${
+                                failedPromises.map((_, i) => participantArray[i].instance.Name)
+                                .reduce((a,v,i) => participantArray[i + 1] ? `${v}, ` : `${v}`, `Client${listSize > 1 ? "s" : ""} `)} failed to load.`)
 
-                this.Starting.Fire();
+                    this.Starting.Fire();
 
-                return res(Promise.fromEvent(this.Ended).finally(
-                    () => (this.matchPhase = MatchPhase.Ending),
-                ));
-            }))
-            
-
+                    return res(Promise.fromEvent(this.Ended).finally(
+                        () => (this.matchPhase = MatchPhase.Ending),
+                    ));
+                }))
         }).then(() => print("match started"));
     }
 
     public Serialize(perspective: Participant)
     {
-        return Dependency<MatchService>().SerializeMatch(perspective, this.matchId);
+        return this.MatchService.SerializeMatch(perspective, this.matchId);
     }
 
     /**
@@ -445,6 +464,7 @@ export class Match
             .then((combatant) =>
             {
                 map.MoveEntityToArena(arenaType, arenaIndex, combatant);
+                print("map locations:", [...map.GetEntityLocations()].map(([e,k]) => [e.attributes.EntityId, k]))
 
                 Events.ArenaChanged(participant.instance, map.attributes.MapId,  arenaIndex);
 
@@ -456,7 +476,9 @@ export class Match
                 Events.SetCombatMode.fire(participant.instance, combatMode);
 
                 return combatant
-            }).catch(print);
+            })
+            .catch(warn)
+            .finally(() => print("done respawning participant", participant?.instance.Name));
     }
 
     public async RespawnTrainingDummy(caller: Participant)
@@ -473,6 +495,7 @@ export class Match
         
         if (this.trainingDummy)
         {
+            this.Died.Fire(this.trainingDummy)
             Components.removeComponent<Entity>(this.trainingDummy.instance);
             this.trainingDummy.instance.Destroy();
         }
@@ -489,8 +512,9 @@ export class Match
         const callerArena = this.GetMap().GetArenaFromIndex(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex);
         assert(callerArena, "caller arena could not be found");
 
-        this.trainingDummy = Dependency<Components>().addComponent<Entity>(DummyCharacterModel);
-        this.GetMap().MoveEntityToArena(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex, this.trainingDummy)
+        (this as unknown as Record<string, unknown>).trainingDummy = Dependency<Components>().addComponent<Entity>(DummyCharacterModel);
+        this.GetMap().MoveEntityToArena(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex, this.trainingDummy!)
+        this.Respawning.Fire(this.trainingDummy!)
         // switch (callerEntityLocation.arenaType)
         // {
         //     case MapNamespace.ArenaType["3D"]:
@@ -634,10 +658,16 @@ export class MatchService implements OnStart, OnInit
         );
 
         assert(ongoingMatch, "no ongoing match");
+        if (!thisParticipant.entity)
+
+            return warn(`the current participant (${thisParticipant.instance.Name}) does not have an entity`, thisParticipant) as never;
+
         const currentMap = ongoingMatch.GetMap();
         const currentLocation = currentMap.GetEntityLocation(
-            thisParticipant.entity!,
+            thisParticipant.entity,
         );
+
+        print([...currentMap.GetEntityLocations()].map(([e,k]) => [e.attributes.EntityId, k]))
         assert(currentLocation, `participant is not in an arena.`);
 
         const matchParticipants = ongoingMatch.GetReadyParticipants();

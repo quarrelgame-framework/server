@@ -5,6 +5,7 @@ import { CharacterManager, Entity, EntityAttributes, EntityBase, ParticipantAttr
 
 import { MatchService } from "services/matchservice.service";
 import Signal from "@rbxts/signal";
+import { QuarrelGame } from "services/quarrelgame.service";
 // import { EntityEvent } from "shared/components/new-entity.component";
 
 interface CombatantLoader
@@ -126,7 +127,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
             });
 
             print("set entity lol")
-            this.entity = Dependency<Components>().addComponent<Entity>(newCharacterModel);
+            this.entity = Dependency<QuarrelGame>().RegisterEntity(newCharacterModel);
             this.instance.Character = newCharacterModel;
             this.character = this.instance.Character;
 
@@ -150,7 +151,7 @@ export class Participant extends BaseComponent<ParticipantAttributes, Player & {
             this.instance.CharacterAdded.Once((char) =>
             {
                 this.character = char;
-                this.entity = Dependency<Components>().addComponent<Entity>(this.character);
+                this.entity = Dependency<QuarrelGame>().RegisterEntity(char);
                 this.setupDiedHandler();
 
                 return res(this.entity);

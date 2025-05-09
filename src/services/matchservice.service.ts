@@ -1,7 +1,7 @@
 import { Components } from "@flamework/components";
 import { Dependency, OnInit, OnStart, Service } from "@flamework/core";
 import { Events, Functions } from "network";
-import { Client, Identifier, Entity, EntityAttributes, TrainingAttributes, CharacterManager, QuarrelAssets } from "@quarrelgame-framework/common";
+import { Client, Identifier, Entity, EntityAttributes, TrainingAttributes, CharacterManager } from "@quarrelgame-framework/common";
 
 import { Participant, ParticipantAttributes } from "components/participant.component";
 import { Map as MapNamespace, MatchSettings, MatchPhase, MatchData as SerializedMatchData } from "@quarrelgame-framework/common";
@@ -21,6 +21,7 @@ export const DefaultMatchSettings: MatchSettings = {
     ArenaType: ArenaTypeFlags["ALLOW_2D"] | ArenaTypeFlags["ALLOW_3D"],
     Map: "happyhome",
 };
+
 
 interface MatchData
 {
@@ -484,6 +485,7 @@ export class Match
     public async RespawnTrainingDummy(caller: Participant)
     {
         // FIXME: add authority for this
+        const quarrelGame = Dependency<QuarrelGame>()
         const {Training = {} as TrainingAttributes} = (this.matchSettings)
         const {CharacterId: DummyCharacterId} = Training.TrainingDummy;
         const Components = Dependency<Components>();
@@ -496,7 +498,7 @@ export class Match
         if (this.trainingDummy)
         {
             this.Died.Fire(this.trainingDummy)
-            Components.removeComponent<Entity>(this.trainingDummy.instance);
+            quarrelGame.UnregisterEntity(this.trainingDummy);
             this.trainingDummy.instance.Destroy();
         }
 
@@ -512,9 +514,10 @@ export class Match
         const callerArena = this.GetMap().GetArenaFromIndex(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex);
         assert(callerArena, "caller arena could not be found");
 
-        (this as unknown as Record<string, unknown>).trainingDummy = Dependency<Components>().addComponent<Entity>(DummyCharacterModel);
+        (this as unknown as Record<string, unknown>).trainingDummy = quarrelGame.RegisterEntity(DummyCharacterModel, Entity);
         this.GetMap().MoveEntityToArena(callerEntityLocation.arenaType, callerEntityLocation.arenaIndex, this.trainingDummy!)
         this.Respawning.Fire(this.trainingDummy!)
+
         // switch (callerEntityLocation.arenaType)
         // {
         //     case MapNamespace.ArenaType["3D"]:
@@ -548,6 +551,8 @@ export class Match
 @Service({})
 export class MatchService implements OnStart, OnInit
 {
+    // TODO: use Dependency<QuarrelGame> once upon onInit(),
+    // make it a property and have methods use this.quarrelGame
     private readonly ongoingMatches = new Map<string, Match>();
 
     onInit()
